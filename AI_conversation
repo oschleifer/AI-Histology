@@ -1,0 +1,167 @@
+import base64
+import requests
+import sys
+import json
+import os
+from PIL import Image
+
+"""
+Brief: Run this program with a path to a folder of images you wish to analyze and optionally
+    with a path to an output folder. This file converts each image to a png, encodeds to 
+    base64, and calls OpenAI to analyze.
+Output: Two folders will be made, "supported_images" contains the converted images 
+    and "JSON_files" has the output files with the AI response. You can write these files 
+    to a specific output folder by including it at the end of the function call.
+Note: For QC checks, adjust end dependencies (_o.png)
+"""
+
+# OpenAI API Key - user dependent
+# TODO Insert your API key here
+api_key = ""
+
+# Function to convert image to a supported image type
+def image_type(inputPath, image):
+   
+   image_path = inputPath + "/" + str(image)
+   im = Image.open(image_path)
+   png_im = im.convert("RGB")
+
+   # output to new directory
+   newPath = "supported_images/" + image[:-4] + ".png"
+   os.makedirs(os.path.dirname(newPath), exist_ok=True)
+
+   if not os.path.exists(newPath):
+    png_im.save(newPath)
+
+   return newPath
+
+# Function to encode the image
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+# Path to your image
+# image_path = "jpg_images/G2M6_quad_10X_r.jpg"
+
+def askAI(image_path):
+    # Getting the base64 string
+    base64_image = encode_image(image_path)
+
+    headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {api_key}"
+    }
+
+    payload = {
+    "model": "gpt-4o",
+    "messages": [
+        {
+        "role": "system",
+        "content": [
+            {
+            "type": "text",
+            # TODO Give the AI background and definitions necessary
+            "text": "You are a world class histologist counting muscle fibers in a given muscle sample. You know everything you are \
+            counting is based mainly on color in the image which is why you can be accurate. You do not randomly generate numbers. \
+            First: Count all the muscle fibers. You know each muscle fiber is outlined in red/orange. Each muscle fiber can be a different size, shape, \
+            and vibrancy. The fibers can be especially small and compact. You know there are typically a lot of fibers in one image. \
+            Second: Count how many muscle fibers contain yellow green color within them. This yellow green specifically indicates where \
+            there is embryonic myosin heavy chain aka where there is a stem cell within a muscle fiber. \
+            Check your work: There are typically little to no stem cells in the muscle sample but the images maybe confusing because of \
+            sampling and camera error. For instance, the fibers can get squished together or stretched a little but you know that it is important to \
+            count as many fibers as possible. You also know that stem cells do not span more than one muscle fiber whereas image artifacts such as \
+            bubbles and glares do. If it is questionable whether a stem cell is present or not, you do not count it. Whereas, if it is questionable \
+            whether a fiber is present or not, you count it. No detailed description is necessary, \
+            instead just respond with queried amounts and nothing else."
+            }
+        ]
+        },
+        {
+        "role": "user",
+        "content": [
+            {
+            "type": "text",
+            # TODO Ask your question
+            "text": "How many muscle fibers are in this picture? How many of those muscle cells contain embryonic myosin heavy chain? For the average fiber size, what percent of muscle fibers contain stem cells in this picture?"
+            },
+            {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{base64_image}"
+            }
+            }
+        ]
+        }
+    ],
+    "max_tokens": 300
+    }
+
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+    responseJ = json.dumps(response.json(), indent=4)
+
+    return responseJ
+
+def main():
+    # checks user input
+    if len(sys.argv) == 3:
+        # path to image folder
+        inputPath = str(sys.argv[1])
+        # path to output folder
+        outputPath = str(sys.argv[2])
+
+        # open image folder
+        folder = os.listdir(inputPath)
+        for image in folder:
+           # convert to supported image type and size
+           # TODO Adjust to your method of image naming 
+           if image.startswith("g4") and not image.endswith(".png"):
+            supported_image = image_type(inputPath, str(image))
+
+            # prompt OpenAI with image
+            if supported_image.endswith(".png"):
+           # TODO Adjust to your method of image naming 
+               # or supported_image.endswith("_Overlay.png"):
+                responseJ = askAI(supported_image)
+
+                # write out response as json file
+                jsonPath = outputPath + "/" + supported_image[17:-4] + ".json"
+                os.makedirs(os.path.dirname(jsonPath), exist_ok=True)
+                with open(jsonPath, "w") as outfile:
+                    outfile.write(responseJ)
+
+                # check in with user
+                print(jsonPath + " is done")
+
+        # TODO add a way to delete the created supported images folder after use
+  
+    elif len(sys.argv) == 2:
+    # if there is no output directory
+        # path to image folder
+        inputPath = str(sys.argv[1])
+        # open image folder
+        folder = os.listdir(inputPath)
+        for image in folder:
+           # convert to supported image type and size
+           # TODO Adjust to your method of image naming 
+           if not image.startswith("._") and not image.endswith(".png"):
+            supported_image = image_type(inputPath, str(image))
+
+           # prompt AI with image
+           # TODO Adjust to your method of image naming 
+           if supported_image.endswith("_o.png") or supported_image.endswith("_Overlay.png"):
+            responseJ = askAI(supported_image)
+
+            # write out response to json file
+            jsonPath = "JSON_files/" + supported_image[17:-4] + ".json"
+            os.makedirs(os.path.dirname(jsonPath), exist_ok=True)
+            with open(jsonPath, "w") as outfile:
+                outfile.write(responseJ)
+
+            print(jsonPath + " is done")
+
+        # os.removedirs(os.path.dirname("supported_images"))
+    else:
+        raise Exception("Incorrect number of arguments: %s" % sys.argv)
+    
+if __name__ == '__main__':
+    sys.exit(main())
